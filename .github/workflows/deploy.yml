@@ -43,7 +43,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 9.x # 指定您想要的pnpm版本，例如6.x, 7.x等
+          version: 9 # 指定您想要的pnpm版本，例如6.x, 7.x等
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Install dependencies
