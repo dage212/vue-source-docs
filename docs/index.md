@@ -3,9 +3,9 @@
 layout: home
 
 hero:
-  name: "vue-source-docs"
-  text: "vue source docs provides a detailed explanation of the Vue source code architecture and principles."
-  tagline: My great project tagline
+  name: "VueSourceDocs"
+  text: "专注Vue源码技术分享 拆解原理和架构设计"
+  tagline: 研究源码架构师的必经之路
   actions:
     - theme: brand
       text: Markdown Examples

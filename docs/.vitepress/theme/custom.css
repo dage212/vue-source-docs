@@ -1,0 +1,10 @@
+.VPImage{
+    width: 40px;
+    height: 40px!important;
+}
+.clip{
+    background: linear-gradient(120deg, #bd34fe 30%, #41d1ff)!important;
+    background-clip: text!important;
+    color: transparent!important;
+    -webkit-text-fill-color: transparent!important;
+}

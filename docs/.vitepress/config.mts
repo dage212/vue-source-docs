@@ -5,6 +5,7 @@ export default defineConfig({
   title: "vue-source-docs",
   description: "vue source docs provides a detailed explanation of the Vue source code architecture and principles.",
   themeConfig: {
+    logo: '/logo.png',
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
@@ -22,7 +23,7 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
+      { icon: 'github', link: 'https://dage212.github.io/' }
     ]
   },
   base: '/vue-source-docs/'
