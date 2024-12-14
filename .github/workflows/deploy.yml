@@ -40,6 +40,10 @@ jobs:
         with:
           node-version: 20
           cache: pnpm # 或 pnpm / yarn
+
+      - name: Install pnpm
+        run: npm install -g pnpm    
+        
       - name: Set up pnpm
         uses: pnpm/action-setup@v3
         with:
