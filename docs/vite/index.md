@@ -55,7 +55,7 @@ vite/
 
 ## package.json
 
-```md
+```json
 
   {
   "name": "@vitejs/vite-monorepo",
@@ -216,3 +216,61 @@ vite/
 
 
 ```
+
+## release命令
+
+执行tsx scripts/release.ts发布代码过程，logRecentCommits打印提交记录，generateChangelog
+生成更新日志changelog,extendCommitHash短hash替换成git rev-parse ${shortHash}生成的长hash
+
+##### scripts/release.ts
+
+```js
+release({
+  repo: 'vite',
+  packages: ['vite', 'create-vite', 'plugin-legacy'],
+  toTag: (pkg, version) =>
+    pkg === 'vite' ? `v${version}` : `${pkg}@${version}`,
+    // 执行 git rev-list -n 1 v${version} 获取最近一次版本的提交记录并取到其hash值
+    // 执行 git --no-pager log hash..HEAD --oneline -- packages/vite // 打印v${version}
+    // 到最新的提交记录之间的记录
+  logChangelog: (pkg) => logRecentCommits(pkg),
+  generateChangelog: async (pkgName) => {
+    if (pkgName === 'create-vite') await updateTemplateVersions()
+    console.log(colors.cyan('\nGenerating changelog...'))
+    const changelogArgs = [
+      'conventional-changelog',
+      '-p',
+      'angular',
+      '-i',
+      'CHANGELOG.md',
+      '-s',
+      '--commit-path',
+      '.',
+    ]
+    if (pkgName !== 'vite') changelogArgs.push('--lerna-package', pkgName)
+    // 执行 npx conventional-changelog -p angular -i CHANGELOG.md -s --commit-path .
+    // 生成更新日志
+    await run('npx', changelogArgs, { cwd: `packages/${pkgName}` })
+    // 把conventional-changelog生成的数字短hash替换成git rev-parse ${shortHash}生成的长hash
+    extendCommitHash(`packages/${pkgName}/CHANGELOG.md`)
+  },
+})
+
+```
+
+release函数里面执行logChangelog和 generateChangelog回调函数后，执行了git相关操作 git add / git commit / git tag / git push等。同时更新了package.json的版本号。这样就完成了发布。release可以简单理解为git操作的封装。
+
+## publish命令
+
+发布执行tsx scripts/publishCI.ts命令
+
+##### scripts/publishCI.ts
+
+```js
+const tag = process.argv.slice(2)[0] ?? ''
+const provenance = !tag.includes('@')
+
+publish({ defaultPackage: 'vite', provenance, packageManager: 'pnpm' })
+```
+publish里面执行 ``` pnpm publish --access public --tag ${tag} --provenance --no-git-checks ```发布npm包。--access public 包访问级别为public，npm所有用户可用。--no-git-checks跳过git检查。
+

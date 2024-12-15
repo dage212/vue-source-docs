@@ -5,7 +5,7 @@ layout: home
 hero:
   name: "VueSourceDocs"
   text: "专注Vue源码技术分享 拆解原理和架构设计"
-  tagline: 研究源码架构师的必经之路
+  tagline: 持续更新中
   actions:
     - theme: brand
       text: Vue项目结构解析

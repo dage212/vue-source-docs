@@ -9,13 +9,13 @@ export default defineConfig({
     logo: '/logo.png',
     // https://vitepress.dev/reference/default-theme-config
     nav: [
-      { text: 'vue源码', link: '/api-examples.md' },
-      { text: 'vue其它', link: '/markdown-examples' }
+      { text: 'vite源码', link: '/vite/index' },
+      { text: 'vue源码', link: '/vue/index' }
     ],
 
     sidebar: {
       '/vue': [
-        { text: 'vue原理', link: '/index' },
+        { text: 'vue原理', link: '/vue/index' },
       ],
       '/vite/': [
         { text: 'vite项目概览', link: '/vite/index' },
