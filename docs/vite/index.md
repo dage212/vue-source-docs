@@ -9,7 +9,7 @@ outline: deep
 ## vite文件结构
 ```md
 vite/
-├── .github/   # github相关文件 
+├── .github/   # github相关文件 部署执行配置文件
 ├── .stackblitz/ # stackblitz相关文件
 ├── docs/ # vite文档相关文件 vite官网的页面就是用这里面的.md生成展示的
 ├── packages/ # vite源码核心文件
@@ -81,15 +81,25 @@ vite/
     "preinstall": "npx only-allow pnpm", 
     //初始化simple-git-hooks
     "postinstall": "simple-git-hooks",
+    // 执行 prettier代码格式化 --write直接修改文件 --cache 缓存 .表示所有文件
     "format": "prettier --write --cache .",
+    // 执行lint代码检查
     "lint": "eslint --cache .",
+    // 执行ts类型检查 --noEmit不需要生成文件 
+    // 并行执行子包typecheck命令 vite包和cretate-vite包都有typecheck命令
     "typecheck": "tsc -p scripts --noEmit && pnpm -r --parallel run typecheck",
+    // 执行测试
     "test": "pnpm test-unit && pnpm test-serve && pnpm test-build",
     "test-serve": "vitest run -c vitest.config.e2e.ts",
+    // 跟test-serve类似，VITE_TEST_BUILD=1有区别，这个参数是区分跑不同的测试用例，
+    //用例里面有判断isServe
     "test-build": "VITE_TEST_BUILD=1 vitest run -c vitest.config.e2e.ts",
+    // 会跑测试用例 不包含playground里面的用例
     "test-unit": "vitest run",
     "test-docs": "pnpm run docs-build",
+    //这个命令同上面test命令，参数不同
     "debug-serve": "VITE_DEBUG_SERVE=1 vitest run -c vitest.config.e2e.ts",
+    //这个命令同上面test命令，参数不同
     "debug-build": "VITE_TEST_BUILD=1 VITE_PRESERVE_BUILD_ARTIFACTS=1 vitest run -c vitest.config.e2e.ts",
     // 启动文档服务
     "docs": "pnpm --filter=docs run docs",
