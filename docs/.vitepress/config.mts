@@ -26,7 +26,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://dage212.github.io/' }
+      { icon: 'github', link: 'https://github.com/dage212' }
     ],
     footer: {
       message: 'MIT Licensed | thanks vue team',

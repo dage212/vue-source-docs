@@ -55,6 +55,8 @@ vite/
 
 ## package.json
 
+项目根目录package.json文件命令介绍:
+
 ```json
 
   {
