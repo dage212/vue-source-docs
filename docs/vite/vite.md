@@ -569,6 +569,571 @@ cli
   })
 ```
 
+createServer具体逻辑
+
+```js 
+export async function _createServer(
+  inlineConfig: InlineConfig = {},
+  options: {
+    listen: boolean
+    previousEnvironments?: Record<string, DevEnvironment>
+  },
+): Promise<ViteDevServer> {
+  // 这里主要是将配置信息进行各种组合，从工程中读取vite.config.xx(后缀名可以是js/ts/mjs/cjs等)配置信息，执行配置插件的config和configResolved方法，并将处理结果合并到config返回结果
+  const config = await resolveConfig(inlineConfig, 'serve')
+
+  // 这里是递归去返回了public里面的静态文件名称，返回文件名称放在new Set()中，返回值是Set类型,
+  // 并把set又放在全局map中进行存储，便于后续调用，核心还是返回public里面的文件名称
+  const initPublicFilesPromise = initPublicFiles(config)
+
+  const { root, server: serverConfig } = config
+
+  // 这里是返回https配置信息
+  const httpsOptions = await resolveHttpsConfig(config.server.https)
+  const { middlewareMode } = serverConfig
+
+  // 输出build的outDir目录，有rollupOptions用rollupOptions，没有就用config.root和
+  // config.build.outDir的拼接
+  const resolvedOutDirs = getResolvedOutDirs(
+    config.root,
+    config.build.outDir,
+    config.build.rollupOptions.output,
+  )
+  // 验证outdir是否在工程根目录下，不在会有warnning提示，并且会用watch监听outdir文件变化，
+  // 反之不监听outdir
+  const emptyOutDir = resolveEmptyOutDir(
+    config.build.emptyOutDir,
+    config.root,
+    resolvedOutDirs,
+  )
+  // 设定watch不需要监听变化的文件夹，默认是node_modules/.git等文件夹,
+  // emptyOutDir为true时，outdir变动也不会被监听
+  const resolvedWatchOptions = resolveChokidarOptions(
+    {
+      disableGlobbing: true,
+      ...serverConfig.watch,
+    },
+    resolvedOutDirs,
+    emptyOutDir,
+    config.cacheDir,
+  )
+  // 这里是创建中间件,更express中间件一个道理
+  const middlewares = connect() as Connect.Server
+  // 这里是创建http服务, 如果用户自定义了server.middlewareMode为true，则不会创建http服务
+  // server会在后面以注册中间件的方式启动http服务，否则在这里直接启动server
+  const httpServer = middlewareMode
+    ? null
+    : await resolveHttpServer(serverConfig, middlewares, httpsOptions)
+
+  // 这里是创建websocket服务，浏览器端会通过websocket与vite建立联系，vite监听到文件变化后，会通过websocket发
+  // 送消息给浏览器端websocket，热更新对应组件
+  // 有一点注意的是，vite创建websocket没有单独创建websocket服务，而是通过http服务创建websocket服务，利用
+  // http的upgrade事件，将http服务升级为websocket服务，而浏览器端是直接创建了websocket服务，这样只用http服务
+  // 就可实现代理proxy和socket通信，一个服务做两件事。
+  const ws = createWebSocketServer(httpServer, config, httpsOptions)
+
+  //这里是public下所有文件名称，采用递归查找，返回一个set集合，async函数返回的是一个promise对象
+  const publicFiles = await initPublicFilesPromise
+  const { publicDir } = config
+
+  // 如果创建http这里则设置http服务异常处理，logger可自定义，无自定义则用默认的logger方法
+  if (httpServer) {
+    setClientErrorHandler(httpServer, config.logger)
+  }
+
+  // eslint-disable-next-line eqeqeq
+  // 这行代码绕过了eslint的eq规则
+  const watchEnabled = serverConfig.watch !== null
+  // 这里判断是否启用watcher监听文件变化，chokidar是第三方库watcher工具库
+  // watch方法两个参数，第一个是配置需要监听的文件目录，第二个是配置
+  const watcher = watchEnabled
+    ? (chokidar.watch(
+        // 监听config file和public是因为config file 和 public 可能在根目录之外
+        [
+          root,
+          ...config.configFileDependencies,
+          ...getEnvFilesForMode(config.mode, config.envDir),
+          ...(publicDir && publicFiles ? [publicDir] : []),
+        ],
+
+        resolvedWatchOptions,
+      ) as FSWatcher)
+    : createNoopWatcher(resolvedWatchOptions)
+
+  const environments: Record<string, DevEnvironment> = {}
+
+  for (const [name, environmentOptions] of Object.entries(
+    config.environments,
+  )) {
+    environments[name] = await environmentOptions.dev.createEnvironment(
+      name,
+      config,
+      {
+        ws,
+      },
+    )
+  }
+
+  for (const environment of Object.values(environments)) {
+    const previousInstance = options.previousEnvironments?.[environment.name]
+    await environment.init({ watcher, previousInstance })
+  }
+
+  // Backward compatibility
+
+  let moduleGraph = new ModuleGraph({
+    client: () => environments.client.moduleGraph,
+    ssr: () => environments.ssr.moduleGraph,
+  })
+
+  //这个顾名思义就是封装插件的方法，返回分装对象，在后面调用
+  const pluginContainer = createPluginContainer(environments)
+
+  // http服务停止时候的回调方法，跟setClientErrorHandler其实可以放一起
+  const closeHttpServer = createServerCloseFn(httpServer)
+
+  // 这个是对index.html文件进行修改，比如head和body的插入，以及script标签需要插入部分逻辑代码，
+  // 因为默认的index.html只有<div id="app">,vue工程运行后会插入用户写js逻辑和css样式，还有vue自身
+  // 修改的代码
+  const devHtmlTransformFn = createDevHtmlTransformFn(config)
+
+  // 这个server是vite最后返回给我们的对象，我们可以调用serve对象提供的方法和获取参数
+  let server: ViteDevServer = {
+    config,
+    middlewares,
+    httpServer,
+    watcher,
+    ws,
+    hot: createDeprecatedHotBroadcaster(ws),
+
+    environments,
+    pluginContainer,
+    get moduleGraph() {
+      warnFutureDeprecation(config, 'removeServerModuleGraph')
+      return moduleGraph
+    },
+    set moduleGraph(graph) {
+      moduleGraph = graph
+    },
+
+    resolvedUrls: null, // will be set on listen
+    ssrTransform(
+      code: string,
+      inMap: SourceMap | { mappings: '' } | null,
+      url: string,
+      originalCode = code,
+    ) {
+      return ssrTransform(code, inMap, url, originalCode, {
+        json: {
+          stringify:
+            config.json.stringify === true && config.json.namedExports !== true,
+        },
+      })
+    },
+    // environment.transformRequest and .warmupRequest don't take an options param for now,
+    // so the logic and error handling needs to be duplicated here.
+    // The only param in options that could be important is `html`, but we may remove it as
+    // that is part of the internal control flow for the vite dev server to be able to bail
+    // out and do the html fallback
+    transformRequest(url, options) {
+      warnFutureDeprecation(
+        config,
+        'removeServerTransformRequest',
+        'server.transformRequest() is deprecated. Use environment.transformRequest() instead.',
+      )
+      const environment = server.environments[options?.ssr ? 'ssr' : 'client']
+      return transformRequest(environment, url, options)
+    },
+    async warmupRequest(url, options) {
+      try {
+        const environment = server.environments[options?.ssr ? 'ssr' : 'client']
+        await transformRequest(environment, url, options)
+      } catch (e) {
+        if (
+          e?.code === ERR_OUTDATED_OPTIMIZED_DEP ||
+          e?.code === ERR_CLOSED_SERVER
+        ) {
+          // these are expected errors
+          return
+        }
+        // Unexpected error, log the issue but avoid an unhandled exception
+        server.config.logger.error(
+          buildErrorMessage(e, [`Pre-transform error: ${e.message}`], false),
+          {
+            error: e,
+            timestamp: true,
+          },
+        )
+      }
+    },
+    transformIndexHtml(url, html, originalUrl) {
+      return devHtmlTransformFn(server, url, html, originalUrl)
+    },
+    async ssrLoadModule(url, opts?: { fixStacktrace?: boolean }) {
+      warnFutureDeprecation(config, 'removeSsrLoadModule')
+      return ssrLoadModule(url, server, opts?.fixStacktrace)
+    },
+    ssrFixStacktrace(e) {
+      ssrFixStacktrace(e, server.environments.ssr.moduleGraph)
+    },
+    ssrRewriteStacktrace(stack: string) {
+      return ssrRewriteStacktrace(stack, server.environments.ssr.moduleGraph)
+    },
+    async reloadModule(module) {
+      if (serverConfig.hmr !== false && module.file) {
+        // TODO: Should we also update the node moduleGraph for backward compatibility?
+        const environmentModule = (module._clientModule ?? module._ssrModule)!
+        updateModules(
+          environments[environmentModule.environment]!,
+          module.file,
+          [environmentModule],
+          Date.now(),
+        )
+      }
+    },
+    async listen(port?: number, isRestart?: boolean) {
+      await startServer(server, port)
+      if (httpServer) {
+        server.resolvedUrls = await resolveServerUrls(
+          httpServer,
+          config.server,
+          config,
+        )
+        if (!isRestart && config.server.open) server.openBrowser()
+      }
+      return server
+    },
+    openBrowser() {
+      const options = server.config.server
+      const url =
+        server.resolvedUrls?.local[0] ?? server.resolvedUrls?.network[0]
+      if (url) {
+        const path =
+          typeof options.open === 'string'
+            ? new URL(options.open, url).href
+            : url
+
+        // We know the url that the browser would be opened to, so we can
+        // start the request while we are awaiting the browser. This will
+        // start the crawling of static imports ~500ms before.
+        // preTransformRequests needs to be enabled for this optimization.
+        if (server.config.server.preTransformRequests) {
+          setTimeout(() => {
+            const getMethod = path.startsWith('https:') ? httpsGet : httpGet
+
+            getMethod(
+              path,
+              {
+                headers: {
+                  // Allow the history middleware to redirect to /index.html
+                  Accept: 'text/html',
+                },
+              },
+              (res) => {
+                res.on('end', () => {
+                  // Ignore response, scripts discovered while processing the entry
+                  // will be preprocessed (server.config.server.preTransformRequests)
+                })
+              },
+            )
+              .on('error', () => {
+                // Ignore errors
+              })
+              .end()
+          }, 0)
+        }
+
+        _openBrowser(path, true, server.config.logger)
+      } else {
+        server.config.logger.warn('No URL available to open in browser')
+      }
+    },
+    async close() {
+      if (!middlewareMode) {
+        teardownSIGTERMListener(closeServerAndExit)
+      }
+
+      await Promise.allSettled([
+        watcher.close(),
+        ws.close(),
+        Promise.allSettled(
+          Object.values(server.environments).map((environment) =>
+            environment.close(),
+          ),
+        ),
+        closeHttpServer(),
+        server._ssrCompatModuleRunner?.close(),
+      ])
+      server.resolvedUrls = null
+      server._ssrCompatModuleRunner = undefined
+    },
+    printUrls() {
+      if (server.resolvedUrls) {
+        printServerUrls(
+          server.resolvedUrls,
+          serverConfig.host,
+          config.logger.info,
+        )
+      } else if (middlewareMode) {
+        throw new Error('cannot print server URLs in middleware mode.')
+      } else {
+        throw new Error(
+          'cannot print server URLs before server.listen is called.',
+        )
+      }
+    },
+    bindCLIShortcuts(options) {
+      bindCLIShortcuts(server, options)
+    },
+    async restart(forceOptimize?: boolean) {
+      if (!server._restartPromise) {
+        server._forceOptimizeOnRestart = !!forceOptimize
+        server._restartPromise = restartServer(server).finally(() => {
+          server._restartPromise = null
+          server._forceOptimizeOnRestart = false
+        })
+      }
+      return server._restartPromise
+    },
+
+    waitForRequestsIdle(ignoredId?: string): Promise<void> {
+      return environments.client.waitForRequestsIdle(ignoredId)
+    },
+
+    _setInternalServer(_server: ViteDevServer) {
+      // Rebind internal the server variable so functions reference the user
+      // server instance after a restart
+      server = _server
+    },
+    _importGlobMap: new Map(),
+    _restartPromise: null,
+    _forceOptimizeOnRestart: false,
+    _shortcutsOptions: undefined,
+  }
+
+  // maintain consistency with the server instance after restarting.
+  const reflexServer = new Proxy(server, {
+    get: (_, property: keyof ViteDevServer) => {
+      return server[property]
+    },
+    set: (_, property: keyof ViteDevServer, value: never) => {
+      server[property] = value
+      return true
+    },
+  })
+
+  const closeServerAndExit = async (_: unknown, exitCode?: number) => {
+    try {
+      await server.close()
+    } finally {
+      process.exitCode ??= exitCode ? 128 + exitCode : undefined
+      process.exit()
+    }
+  }
+
+  if (!middlewareMode) {
+    setupSIGTERMListener(closeServerAndExit)
+  }
+
+  const onHMRUpdate = async (
+    type: 'create' | 'delete' | 'update',
+    file: string,
+  ) => {
+    if (serverConfig.hmr !== false) {
+      await handleHMRUpdate(type, file, server)
+    }
+  }
+
+  const onFileAddUnlink = async (file: string, isUnlink: boolean) => {
+    file = normalizePath(file)
+    reloadOnTsconfigChange(server, file)
+
+    await pluginContainer.watchChange(file, {
+      event: isUnlink ? 'delete' : 'create',
+    })
+
+    if (publicDir && publicFiles) {
+      if (file.startsWith(publicDir)) {
+        const path = file.slice(publicDir.length)
+        publicFiles[isUnlink ? 'delete' : 'add'](path)
+        if (!isUnlink) {
+          const clientModuleGraph = server.environments.client.moduleGraph
+          const moduleWithSamePath =
+            await clientModuleGraph.getModuleByUrl(path)
+          const etag = moduleWithSamePath?.transformResult?.etag
+          if (etag) {
+            // The public file should win on the next request over a module with the
+            // same path. Prevent the transform etag fast path from serving the module
+            clientModuleGraph.etagToModuleMap.delete(etag)
+          }
+        }
+      }
+    }
+    if (isUnlink) {
+      // invalidate module graph cache on file change
+      for (const environment of Object.values(server.environments)) {
+        environment.moduleGraph.onFileDelete(file)
+      }
+    }
+    await onHMRUpdate(isUnlink ? 'delete' : 'create', file)
+  }
+
+  watcher.on('change', async (file) => {
+    file = normalizePath(file)
+    reloadOnTsconfigChange(server, file)
+
+    await pluginContainer.watchChange(file, { event: 'update' })
+    // invalidate module graph cache on file change
+    for (const environment of Object.values(server.environments)) {
+      environment.moduleGraph.onFileChange(file)
+    }
+    await onHMRUpdate('update', file)
+  })
+
+  watcher.on('add', (file) => {
+    onFileAddUnlink(file, false)
+  })
+  watcher.on('unlink', (file) => {
+    onFileAddUnlink(file, true)
+  })
+
+  if (!middlewareMode && httpServer) {
+    httpServer.once('listening', () => {
+      // update actual port since this may be different from initial value
+      serverConfig.port = (httpServer.address() as net.AddressInfo).port
+    })
+  }
+
+  // apply server configuration hooks from plugins
+  const postHooks: ((() => void) | void)[] = []
+  for (const hook of config.getSortedPluginHooks('configureServer')) {
+    postHooks.push(await hook(reflexServer))
+  }
+
+  // Internal middlewares ------------------------------------------------------
+
+  // request timer
+  if (process.env.DEBUG) {
+    middlewares.use(timeMiddleware(root))
+  }
+
+  // cors (enabled by default)
+  const { cors } = serverConfig
+  if (cors !== false) {
+    middlewares.use(corsMiddleware(typeof cors === 'boolean' ? {} : cors))
+  }
+
+  middlewares.use(cachedTransformMiddleware(server))
+
+  // proxy
+  const { proxy } = serverConfig
+  if (proxy) {
+    const middlewareServer =
+      (isObject(middlewareMode) ? middlewareMode.server : null) || httpServer
+    middlewares.use(proxyMiddleware(middlewareServer, proxy, config))
+  }
+
+  // base
+  if (config.base !== '/') {
+    middlewares.use(baseMiddleware(config.rawBase, !!middlewareMode))
+  }
+
+  // open in editor support
+  middlewares.use('/__open-in-editor', launchEditorMiddleware())
+
+  // ping request handler
+  // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
+  middlewares.use(function viteHMRPingMiddleware(req, res, next) {
+    if (req.headers['accept'] === 'text/x-vite-ping') {
+      res.writeHead(204).end()
+    } else {
+      next()
+    }
+  })
+
+  // serve static files under /public
+  // this applies before the transform middleware so that these files are served
+  // as-is without transforms.
+  if (publicDir) {
+    middlewares.use(servePublicMiddleware(server, publicFiles))
+  }
+
+  // main transform middleware
+  middlewares.use(transformMiddleware(server))
+
+  // serve static files
+  middlewares.use(serveRawFsMiddleware(server))
+  middlewares.use(serveStaticMiddleware(server))
+
+  // html fallback
+  if (config.appType === 'spa' || config.appType === 'mpa') {
+    middlewares.use(htmlFallbackMiddleware(root, config.appType === 'spa'))
+  }
+
+  // run post config hooks
+  // This is applied before the html middleware so that user middleware can
+  // serve custom content instead of index.html.
+  postHooks.forEach((fn) => fn && fn())
+
+  if (config.appType === 'spa' || config.appType === 'mpa') {
+    // transform index.html
+    middlewares.use(indexHtmlMiddleware(root, server))
+
+    // handle 404s
+    middlewares.use(notFoundMiddleware())
+  }
+
+  // error handler
+  middlewares.use(errorMiddleware(server, !!middlewareMode))
+
+  // httpServer.listen can be called multiple times
+  // when port when using next port number
+  // this code is to avoid calling buildStart multiple times
+  let initingServer: Promise<void> | undefined
+  let serverInited = false
+  const initServer = async (onListen: boolean) => {
+    if (serverInited) return
+    if (initingServer) return initingServer
+
+    initingServer = (async function () {
+      // For backward compatibility, we call buildStart for the client
+      // environment when initing the server. For other environments
+      // buildStart will be called when the first request is transformed
+      await environments.client.pluginContainer.buildStart()
+
+      // ensure ws server started
+      if (onListen || options.listen) {
+        await Promise.all(
+          Object.values(environments).map((e) => e.listen(server)),
+        )
+      }
+
+      initingServer = undefined
+      serverInited = true
+    })()
+    return initingServer
+  }
+
+  if (!middlewareMode && httpServer) {
+    // overwrite listen to init optimizer before server start
+    const listen = httpServer.listen.bind(httpServer)
+    httpServer.listen = (async (port: number, ...args: any[]) => {
+      try {
+        await initServer(true)
+      } catch (e) {
+        httpServer.emit('error', e)
+        return
+      }
+      return listen(port, ...args)
+    }) as any
+  } else {
+    await initServer(false)
+  }
+
+  return server
+}
+```
+
 
 
 
