@@ -3,7 +3,7 @@
     "routes": [
       {
         "src": "/vue-source-docs/(.*)",
-        "dest": "/docs/.vitepress/dist/$1"
+        "dest": "/$1"
       }
     ]
   }
