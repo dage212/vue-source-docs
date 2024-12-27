@@ -1,0 +1,19 @@
+{
+    "version": 2,
+    "builds": [
+      {
+        "src": "package.json",
+        "use": "@vercel/node",
+        "config": {
+          "distDir": "docs/.vitepress/dist"
+        }
+      }
+    ],
+    "routes": [
+      {
+        "src": "/vue-source-docs/(.*)",
+        "dest": "/docs/.vitepress/dist/$1"
+      }
+    ]
+  }
+  
