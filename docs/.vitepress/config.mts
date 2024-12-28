@@ -33,5 +33,9 @@ export default defineConfig({
       copyright: 'Copyright © 2024-present dage212'
     }
   },
-  base: '/vue-source-docs/'
+  base: '/vue-source-docs/',
+  sitemap: {
+    hostname: 'https://www.dage212.xin/vue-source-docs/'
+  },
+  lastUpdated: true
 })
