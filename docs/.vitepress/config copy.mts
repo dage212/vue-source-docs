@@ -2,8 +2,8 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "code-source-docs",
-  description: "source code docs provides a detailed explanation of the Vue source code architecture and principles.",
+  title: "SourceCodeDocs",
+  description: "SourceCodeDocs provides a detailed explanation of the Vue source code architecture and principles.",
   head: [['link', { rel: 'icon', href: '/vue-source-docs/logo.ico' }]],
   themeConfig: {
     logo: 'logo.png',
