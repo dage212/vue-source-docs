@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "SourceCodeDocs"
-  text: "源码解析博客网站"
-  tagline: SourceCodeDocs是一个专注源码的博客网站，不定期更新源码解析，持续更新中，敬请关注
+  text: "源码解析分享网站"
+  tagline: SourceCodeDocs是一个专注源码的网站，不定期更新源码解析，持续更新中，敬请关注
   actions:
     - theme: brand
       text: Vue项目结构解析

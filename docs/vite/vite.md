@@ -697,16 +697,23 @@ export async function _createServer(
   // 修改的代码
   const devHtmlTransformFn = createDevHtmlTransformFn(config)
 
-  // 这个server是vite最后返回给我们的对象，我们可以调用serve对象提供的方法和获取参数
+  // 这个server是vite最后返回给我们的对象，我们在使用vite时候调用的方法就是sever这个对象返回的，
+  // 这个server就是上面内容的总结，向外提供给我们封装好的对象，便于我们配置相关参数和调用
   let server: ViteDevServer = {
+    //配置信息
     config,
+    // 中间件
     middlewares,
     httpServer,
+    // 文件变化监听，比如文件修改新增删除都会触发
     watcher,
+    //这个是websocket
     ws,
+    // 这个是对旧版本热更新的兼容，新的用environment.hot替换
     hot: createDeprecatedHotBroadcaster(ws),
 
     environments,
+    // 插件容器，其实就是将插件的相关方法封装在一起
     pluginContainer,
     get moduleGraph() {
       warnFutureDeprecation(config, 'removeServerModuleGraph')
@@ -1134,7 +1141,85 @@ export async function _createServer(
 }
 ```
 
+## vite热更新实现原理
+vite的热更新是通过websocket实现的。
 
+##### watcher监听 
+watcher对应的是server.watch配置。server.watch配置不为null就会被启用。watcher主要是做文件监听，当文件发生变化时（即文件内容修改，新增文件，删除文件），会触发热更新。watcher的实现是基于[chokidar](https://www.npmjs.com/package/chokidar)实现的。源码中调用chokidar.watch(paths,options)来监听文件变化。chokidar.watch有两个参数，第一个paths监听的文件路径数组，第二个options配置项。这里监听文件目录有root根目录，public目录，和一些配置文件。源码是这样的:
+
+```js
+chokidar.watch(
+        [
+          //项目根目录
+          root,
+          // vite.cinfig.js配置文件中依赖的文件路径数组
+          ...config.configFileDependencies,
+          // 是.env文件，.env环境变量配置文件。envDir是.env文件所在目录是可配置，不一定在根目录
+          ...getEnvFilesForMode(config.mode, config.envDir),
+          // public目录，一般情况public在根目录里，也有可能不在根目录，因为publicDir是可配置的
+          ...(publicDir && publicFiles ? [publicDir] : []),
+        ],
+        //看下面代码块
+        resolvedWatchOptions,
+      )
+```
+
+```js
+  // 这里主要是watcher监听需要忽略的文件和目录，这里主要是忽略node_modules目录和OutDirs输出目录以及
+  // cacheDir缓存目录，默认是node_modules/.vite，用来存放编译后的文件。
+ const resolvedWatchOptions = resolveChokidarOptions(
+    {
+      disableGlobbing: true,
+      ...serverConfig.watch,
+    },
+    resolvedOutDirs,
+    // boolean值,为true时，outP忽略outDirs,在启动服务器时会清空OutDirs目录下的文件。为false会提示
+    emptyOutDir,
+    config.cacheDir,
+  )
+```
+上面是watcher对象的创建，下面注册的change/add/unlink事件，触发了热更新。
+
+```js
+  // 注册change事件，通过上面watch方法监听，工程文件内容变化的时候会触发
+  watcher.on('change', async (file) => {
+    //转换文件路径，//aa//bb//cc.js => /aa/bb/cc.js
+    file = normalizePath(file)
+    //
+    reloadOnTsconfigChange(server, file)
+
+    await pluginContainer.watchChange(file, { event: 'update' })
+    // invalidate module graph cache on file change
+    for (const environment of Object.values(server.environments)) {
+      environment.moduleGraph.onFileChange(file)
+    }
+    await onHMRUpdate('update', file)
+  })
+  // 注册add事件，通过上面watch方法监听，工程新增文件的时候会触发
+  watcher.on('add', (file) => {
+    onFileAddUnlink(file, false)
+  })
+  // 注册unlink事件，通过上面watch方法监听，工程删除文件的时候会触发
+  watcher.on('unlink', (file) => {
+    onFileAddUnlink(file, true)
+  })
+```
+
+
+
+
+
+
+
+
+
+**通知变化**
+
+**更新代码**
+
+```md
+
+```
 
 
 
