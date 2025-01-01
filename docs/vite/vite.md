@@ -1144,7 +1144,7 @@ export async function _createServer(
 ## vite热更新实现原理
 vite的热更新是通过websocket实现的。
 
-##### watcher监听 
+##### 第一步：watcher监听 
 watcher对应的是server.watch配置。server.watch配置不为null就会被启用。watcher主要是做文件监听，当文件发生变化时（即文件内容修改，新增文件，删除文件），会触发热更新。watcher的实现是基于[chokidar](https://www.npmjs.com/package/chokidar)实现的。源码中调用chokidar.watch(paths,options)来监听文件变化。chokidar.watch有两个参数，第一个paths监听的文件路径数组，第二个options配置项。这里监听文件目录有root根目录，public目录，和一些配置文件。源码是这样的:
 
 ```js
@@ -1178,6 +1178,8 @@ chokidar.watch(
     config.cacheDir,
   )
 ```
+##### 第二步：通知变化
+
 上面是watcher对象的创建，下面注册的change/add/unlink事件，触发了热更新。
 
 ```js
@@ -1187,15 +1189,28 @@ chokidar.watch(
     file = normalizePath(file)
     //
     reloadOnTsconfigChange(server, file)
-
+    // 这里执行插件的watchChange方法，用vite写自定义插件时候，可以注册方法，调用时机
+    // 就是在这里调用的跟插件其它方法buildStart/transform等一样，这个方法没有在vite
+    // 官方文档没有写。
     await pluginContainer.watchChange(file, { event: 'update' })
-    // invalidate module graph cache on file change
+    // 下面是更新模块图，模块图存储是文件路径和模块依赖关系的映射表。
+    // 每个文件在不同环境会有对应模块图对象，vite源码叫EnvironmentModuleNode,因为跟
+    // 环境对应的，不同的环境同一个文件EnvironmentModuleNode是不同的，所以都带
+    // 有Environment。EnvironmentModuleNode对象存储着这个文件的编译后代码（vite源码
+    // 叫transformResult）和被依赖的模块（vite源码叫importedModules,谁依赖了它）
+    // 等其它相关信息。
+    // EnvironmentModuleGraph对象主要负责调配管理各个EnvironmentModuleNode。这里
+    // onFileChange本质是取消各种关系载的依赖，因为文件变化重新编译，所以需要取消之前
+    // 的依赖关系。那取消依赖关系后依赖关系怎么建立呢？onHMRUpdate更新会执行restart方法，
+    // 该方法会重新建立依赖关系。
     for (const environment of Object.values(server.environments)) {
       environment.moduleGraph.onFileChange(file)
     }
     await onHMRUpdate('update', file)
   })
-  // 注册add事件，通过上面watch方法监听，工程新增文件的时候会触发
+  // 注册add事件，通过上面watch方法监听，工程新增文件的时候会触发。onFileAddUnlink
+  //做的事情其实跟上面本质差不多，更新配置文件，调用注册的watchChange方法，更新模块关系图。
+
   watcher.on('add', (file) => {
     onFileAddUnlink(file, false)
   })
@@ -1203,8 +1218,43 @@ chokidar.watch(
   watcher.on('unlink', (file) => {
     onFileAddUnlink(file, true)
   })
+
+  const onFileAddUnlink = async (file: string, isUnlink: boolean) => {
+    file = normalizePath(file)
+    // 
+    reloadOnTsconfigChange(server, file)
+    //触发插件的watchChange方法，跟上面一样。这里就不展开了。
+    await pluginContainer.watchChange(file, {
+      event: isUnlink ? 'delete' : 'create',
+    })
+
+    if (publicDir && publicFiles) {
+      if (file.startsWith(publicDir)) {
+        const path = file.slice(publicDir.length)
+        publicFiles[isUnlink ? 'delete' : 'add'](path)
+        if (!isUnlink) {
+          const clientModuleGraph = server.environments.client.moduleGraph
+          const moduleWithSamePath =
+            await clientModuleGraph.getModuleByUrl(path)
+          const etag = moduleWithSamePath?.transformResult?.etag
+          if (etag) {
+            // 删除之前的etag
+            clientModuleGraph.etagToModuleMap.delete(etag)
+          }
+        }
+      }
+    }
+    if (isUnlink) {
+      // 删除文件时候会从依赖本模块的模块中（importedModules中删除引用）移除本模块的引用
+      for (const environment of Object.values(server.environments)) {
+        environment.moduleGraph.onFileDelete(file)
+      }
+    }
+    await onHMRUpdate(isUnlink ? 'delete' : 'create', file)
+  }
 ```
 
+##### 第三步：代码更新
 
 
 
@@ -1213,7 +1263,8 @@ chokidar.watch(
 
 
 
-**通知变化**
+
+
 
 **更新代码**
 
