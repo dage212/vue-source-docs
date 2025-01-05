@@ -1178,7 +1178,7 @@ chokidar.watch(
     config.cacheDir,
   )
 ```
-##### 第二步：通知变化
+##### 第二步：触发watcher事件
 
 上面是watcher对象的创建，下面注册的change/add/unlink事件，触发了热更新。
 
@@ -1187,7 +1187,10 @@ chokidar.watch(
   watcher.on('change', async (file) => {
     //转换文件路径，//aa//bb//cc.js => /aa/bb/cc.js
     file = normalizePath(file)
-    //
+    // 如果修改的是这个方法主要是针对tsconfig.json配置文件，清除给tsconfgig.json文件
+    // 做的缓存，清除file所关联moduleGraph关系图（简单理解为file中引用的其它文件模块），
+    // 清除引用关系给浏览器发送full-reload事件通知，是通过websocket通信的，告诉浏览器
+    // 重新加载页面。
     reloadOnTsconfigChange(server, file)
     // 这里执行插件的watchChange方法，用vite写自定义插件时候，可以注册方法，调用时机
     // 就是在这里调用的跟插件其它方法buildStart/transform等一样，这个方法没有在vite
@@ -1204,12 +1207,15 @@ chokidar.watch(
     // 的依赖关系。那取消依赖关系后依赖关系怎么建立呢？onHMRUpdate更新会执行restart方法，
     // 该方法会重新建立依赖关系。
     for (const environment of Object.values(server.environments)) {
+      //这里遍历不同环境，更新file关系图，因为file文件内容变化，清空了file之前被引用关
+      // 联关系
       environment.moduleGraph.onFileChange(file)
     }
     await onHMRUpdate('update', file)
   })
   // 注册add事件，通过上面watch方法监听，工程新增文件的时候会触发。onFileAddUnlink
-  //做的事情其实跟上面本质差不多，更新配置文件，调用注册的watchChange方法，更新模块关系图。
+  //做的事情其实跟上面本质差不多，更新配置文件，调用注册的watchChange方法，更新模块
+  // 关系图。
 
   watcher.on('add', (file) => {
     onFileAddUnlink(file, false)
@@ -1221,8 +1227,11 @@ chokidar.watch(
 
   const onFileAddUnlink = async (file: string, isUnlink: boolean) => {
     file = normalizePath(file)
-    // 
+    // 如果是tsconfig.json配置文件或者xxx.json文件，会清除之前的缓存，
+    // 同时清除之前所有文件的依赖关系。因为配置文件发生变化，整个工程都受
+    // 影响，所有发出full-reload事件。重新reload加载页面。
     reloadOnTsconfigChange(server, file)
+    //触发插件的watchChange(server, file)
     //触发插件的watchChange方法，跟上面一样。这里就不展开了。
     await pluginContainer.watchChange(file, {
       event: isUnlink ? 'delete' : 'create',
@@ -1254,7 +1263,142 @@ chokidar.watch(
   }
 ```
 
-##### 第三步：代码更新
+##### 第三步：发送websocket消息给浏览器
+
+上面watcher监听文件变化后，触发了onHMRUpdate方法，该方法会给浏览器发更新通知，触发热更新。
+
+1. 重启新的服务，_createServer启动http服务和建立websocket连接, server.close停掉原先的服务，server.close里面停止之前http服务和关闭websocket连接。
+
+```js
+  try {
+      newServer = await _createServer(inlineConfig, {
+        listen: false,
+        previousEnvironments: server.environments,
+      })
+    } catch (err: any) {
+      server.config.logger.error(err.message, {
+        timestamp: true,
+      })
+      server.config.logger.error('server restart failed', { timestamp: true })
+      return
+    }
+
+    await server.close()
+```
+
+2. 执行插件的hotUpdate或者handleHotUpdate回调方法
+```js
+ try {
+    for (const plugin of getSortedHotUpdatePlugins(
+      server.environments.client,
+    )) {
+      // add/delete 触发热更新时，执行插件的hotUpdate方法
+
+      if (plugin.hotUpdate) {
+        const filteredModules = await getHookHandler(plugin.hotUpdate).call(
+          clientContext,
+          clientHotUpdateOptions,
+        )
+        // 此处省略总其它代码
+        }
+      } else if (type === 'update') {
+        // update 触发热更新时，执行插件的handleHotUpdate方法
+        const filteredModules = await getHookHandler(plugin.handleHotUpdate!)(
+          mixedHmrContext,
+        )
+    }
+  } catch (error) {
+    hotMap.get(server.environments.client)!.error = error
+  }
+```
+
+3. 发websocket消息给浏览器
+```js
+ async function hmr(environment: DevEnvironment) {
+    try {
+      const { options, error } = hotMap.get(environment)!
+      if (error) {
+        throw error
+      }
+      //如果变动的文件是html类型的文件，执行通知浏览器重新加载页面
+      // full-reload 浏览器暴力执行location.reload()，相当于刷新页面
+      if (!options.modules.length) {
+        if (file.endsWith('.html')) {
+          environment.hot.send({
+            type: 'full-reload',
+            path: config.server.middlewareMode
+              ? '*'
+              : '/' + normalizePath(path.relative(config.root, file)),
+          })
+        } else {
+          debugHmr?.(
+            `(${environment.name}) [no modules matched] ${colors.dim(shortFile)}`,
+          )
+        }
+        return
+      }
+
+      updateModules(environment, shortFile, options.modules, timestamp)
+    } catch (err) {
+      // 报错发捕获异常
+      environment.hot.send({
+        type: 'error',
+        err: prepareError(err),
+      })
+    }
+  }
+```
+
+4. updateModules方法，给浏览器发websocket消息通知更新模块。
+```js
+export function updateModules(
+  environment: DevEnvironment,
+  file: string,
+  modules: EnvironmentModuleNode[],
+  timestamp: number,
+  afterInvalidation?: boolean,
+): void {
+  const traversedModules = new Set<EnvironmentModuleNode>()
+  for (const mod of modules) {
+    const boundaries: PropagationBoundary[] = []
+    // 
+    const hasDeadEnd = propagateUpdate(mod, traversedModules, boundaries)
+    // 发消息之前消除file模块的依赖关系图，更新后会重新创建关系图
+    // 关系图记录的是本文件被哪些文件引用，还有本文件的代码
+    environment.moduleGraph.invalidateModule(
+      mod,
+      invalidatedModules,
+      timestamp,
+      true,
+    )
+    // 省略其它代码
+    
+    //updates.push(...) 给浏览器发websocket消息，通知更新模块
+    updates.push(
+      ...boundaries.map(
+        ({ boundary, acceptedVia, isWithinCircularImport }) => ({
+          type: `${boundary.type}-update` as const,
+          timestamp,
+          path: normalizeHmrUrl(boundary.url),
+          acceptedPath: normalizeHmrUrl(acceptedVia.url),
+          explicitImportRequired:
+            boundary.type === 'js'
+              ? isExplicitImportRequired(acceptedVia.url)
+              : false,
+          isWithinCircularImport,
+        }),
+      ),
+    )
+  }
+  // 给浏览器发websocket消息，通知更新模块
+  hot.send({
+    type: 'update',
+    updates,
+  })
+}
+```
+##### 第四步：前端浏览器代码更新
+
 
 
 
