@@ -1398,23 +1398,36 @@ export function updateModules(
 }
 ```
 ##### 第四步：前端浏览器代码更新
-
-
-
-
-
-
-
-
-
-
-
-
-**更新代码**
-
-```md
-
+前端浏览器建立socket连接过程：当vite启动服务后，浏览器打开页面时候vite会给每个组件文件进行编译转换，讲xxx.vue文件里面的template/script转换成正常js代码,其中有一步骤就是在每个文件注入```import {createHotContext as __vite__createHotContext} from "/@vite/client";import.meta.hot = __vite__createHotContext("/xxx.vue");```这段代码,这段代码因为import引用文件的原因，会执行get请求，去vite服务端请求packages\vite\src\client\client.ts文件，client.ts文件里面执行了浏览器websocket建立连接。当接收到vite发来的
+消息，浏览器端会执行vue源码里面的reload或者rerender方法去重新渲染组件，实现热更新。
+这是vite-plugin-vue插件执行的时候注入到xxx.vue文件里面代码，用于接收到socket消息后更新组件：
+```js
+import.meta.hot.accept(mod => {
+  if (!mod) return
+  const { default: updated, _rerender_only } = mod
+  if (_rerender_only) {
+    __VUE_HMR_RUNTIME__.rerender(updated.__hmrId, updated.render)
+  } else {
+    __VUE_HMR_RUNTIME__.reload(updated.__hmrId, updated)
+  }
+})
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
