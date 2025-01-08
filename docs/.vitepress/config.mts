@@ -4,7 +4,18 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "SourceCodeDocs",
   description: "SourceCodeDocs provides a detailed explanation of the VueSourceCode architecture and principles.",
-  head: [['link', { rel: 'icon', href: '/vue-source-docs/logo.ico' }]],
+  head: [
+    ['link', { rel: 'icon', href: '/vue-source-docs/logo.ico' }], 
+    ['script', {}, `
+      var _hmt = _hmt || [];
+      (function() {
+        var hm = document.createElement("script");
+        hm.src = "https://hm.baidu.com/hm.js?0e2aade999bb365c5cf476fe3d46c079";
+        var s = document.getElementsByTagName("script")[0]; 
+        s.parentNode.insertBefore(hm, s);
+      })();
+    `]
+],
   themeConfig: {
     logo: '/logo.png',
     // https://vitepress.dev/reference/default-theme-config
