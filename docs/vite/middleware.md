@@ -102,7 +102,7 @@ export function injectCspNonceMetaTagHook(
 
 ## transformMiddleware中间件
 ::: tip transformMiddleware中间件
-transformMiddleware主要编译其它文件(.html文件不处理)，当打开`localhost:5173/`将index.html文件返回给浏览器后，浏览器会根据index.html文件中引用的其它文件(比如index.js/index.css等等)，会再次发起请求，这时候transformMiddleware中间件就会对这些文件进行编译转换，然后将转换的结果返回给浏览器。transform中会依次执行vite插件api函数，`resolveId/load/transform`方法。vite执行方法的顺序跟rollup是类似的，`先执行所有插件的resolveId方法，然后执行load方法，最后执行transform方法`,最终把编译好的代码经过`res.end(result)`返回给浏览器。源码如下：
+transformMiddleware主要编译.html以外其它文件(.html文件不处理)，当在浏览器输入`localhost:5173/`后，浏览器对vite发起请求，vite首先将index.html文件返回给浏览器，浏览器会根据index.html文件中引用的其它文件(比如index.js/index.css等等)，会再次发起请求，这时候transformMiddleware中间件就会对这些文件进行编译转换，然后将转换的结果返回给浏览器。transform中会依次执行vite插件api函数，`resolveId/load/transform`方法。vite执行方法的顺序跟rollup是类似的，`先执行所有插件的resolveId方法，然后执行load方法，最后执行transform方法`,最终把编译好的代码经过`res.end(result)`返回给浏览器。源码如下：
 :::
 
 
