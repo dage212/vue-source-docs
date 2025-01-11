@@ -31,6 +31,8 @@ export default defineConfig({
       '/vite/': [
         { text: 'vite项目概览', link: '/vite/index' },
         { text: 'vite源码', link: '/vite/vite' },
+        { text: 'vite热更新原理', link: '/vite/hot' },
+        { text: 'vite中间件原理', link: '/vite/middleware' },
         { text: 'create-vite源码', link: '/vite/create-vite' },
         { text: 'plugin-legacy源码', link: '/vite/plugin-legacy' },
       ]
