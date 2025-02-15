@@ -35,7 +35,10 @@ export default defineConfig({
         { text: 'vite中间件原理', link: '/vite/middleware' },
         { text: 'vuePlugin原理', link: '/vite/vue-plugin' },
         { text: 'plugin-legacy源码', link: '/vite/plugin-legacy' },
-      ]
+      ],
+      '/oxc/': [
+        { text: 'oxc项目介绍', link: '/oxc/index' },
+      ],
     },
 
     socialLinks: [

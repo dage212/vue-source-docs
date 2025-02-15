@@ -25,7 +25,10 @@ features:
       src: /vue.jpg
     details: 主要讲述vue源码拆解和分析
     link: /vue
-  - title: 其它
-    details: 暂无
+  - title: Oxc
+    icon: 
+      src: /oxc.png
+    details: Oxc源码解析
+    link: /oxc
 ---
 
