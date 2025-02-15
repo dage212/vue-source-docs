@@ -33,7 +33,7 @@ export default defineConfig({
         { text: 'vite源码', link: '/vite/vite' },
         { text: 'vite热更新原理', link: '/vite/hot' },
         { text: 'vite中间件原理', link: '/vite/middleware' },
-        { text: 'create-vite源码', link: '/vite/create-vite' },
+        { text: 'vuePlugin原理', link: '/vite/vue-plugin' },
         { text: 'plugin-legacy源码', link: '/vite/plugin-legacy' },
       ]
     },
