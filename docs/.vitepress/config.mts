@@ -51,7 +51,7 @@ export default defineConfig({
   },
   base: '/vue-source-docs/',
   sitemap: {
-    hostname: 'https://www.dage212.xin/vue-source-docs/'
+    hostname: 'https://dage212.github.io/vue-source-docs/'
   },
   lastUpdated: true
 })
